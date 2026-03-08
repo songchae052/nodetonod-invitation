@@ -19,20 +19,58 @@ async function startServer() {
         return res.status(500).json({ error: "Server configuration error: Missing Google Sheets credentials" });
       }
 
-      let privateKey = process.env.GOOGLE_PRIVATE_KEY;
+      let privateKey = process.env.GOOGLE_PRIVATE_KEY || "";
+
+      // 1. Handle JSON input (if user pasted the full JSON file content)
+      if (privateKey.trim().startsWith('{')) {
+        try {
+          const keyJson = JSON.parse(privateKey);
+          if (keyJson.private_key) {
+            privateKey = keyJson.private_key;
+          }
+        } catch (e) {
+          // Not valid JSON, treat as string
+        }
+      }
+
+      // 2. Normalization
+      // Replace literal escaped newlines with real newlines
+      privateKey = privateKey.replace(/\\n/g, '\n');
       
-      // Remove surrounding quotes if present (common when copying from env files)
+      // Remove surrounding quotes if present
       if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
         privateKey = privateKey.slice(1, -1);
       }
-      
-      // Replace literal \n with actual newlines
-      // This handles keys that are single-line strings with \n characters
-      privateKey = privateKey.replace(/\\n/g, '\n');
 
-      console.log("Private Key Length:", privateKey.length);
-      console.log("Private Key Start:", privateKey.substring(0, 30));
-      console.log("Private Key End:", privateKey.substring(privateKey.length - 30));
+      // 3. Aggressive Cleanup & Rebuild
+      // Detect header type before stripping
+      const isRsa = privateKey.includes('BEGIN RSA PRIVATE KEY');
+      
+      // Remove existing headers, footers, and all whitespace to get the pure base64 string
+      const rawBody = privateKey
+        .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+        .replace(/-----END PRIVATE KEY-----/g, '')
+        .replace(/-----BEGIN RSA PRIVATE KEY-----/g, '')
+        .replace(/-----END RSA PRIVATE KEY-----/g, '')
+        .replace(/\s/g, ''); // Remove all spaces, tabs, newlines
+
+      // Check if we actually have a key body left
+      if (rawBody.length < 100) {
+        console.error("Private key is too short or empty after cleanup.");
+        return res.status(500).json({ error: "Server configuration error: Invalid Google Private Key format" });
+      }
+
+      // Reconstruct the PEM string with correct headers and newlines
+      // Split into 64-character lines for strict PEM compliance
+      const chunkedBody = rawBody.match(/.{1,64}/g)?.join('\n') || rawBody;
+      
+      if (isRsa) {
+        privateKey = `-----BEGIN RSA PRIVATE KEY-----\n${chunkedBody}\n-----END RSA PRIVATE KEY-----\n`;
+      } else {
+        privateKey = `-----BEGIN PRIVATE KEY-----\n${chunkedBody}\n-----END PRIVATE KEY-----\n`;
+      }
+
+      // console.log("Reconstructed Key (first 50 chars):", privateKey.substring(0, 50));
 
       const auth = new google.auth.GoogleAuth({
         credentials: {
@@ -44,9 +82,24 @@ async function startServer() {
 
       const sheets = google.sheets({ version: 'v4', auth });
 
+      // 1. Get spreadsheet metadata to find the correct sheet name
+      const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
+      const meta = await sheets.spreadsheets.get({
+        spreadsheetId,
+      });
+
+      const sheetTitle = meta.data.sheets?.[0]?.properties?.title;
+      if (!sheetTitle) {
+        throw new Error("No sheets found in the spreadsheet");
+      }
+
+      // 2. Append to the first sheet found
+      // Use single quotes around the sheet title to handle spaces or special characters
+      const range = `'${sheetTitle}'!A:C`;
+
       await sheets.spreadsheets.values.append({
-        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
-        range: 'Sheet1!A:C', // Assuming Sheet1, columns A, B, C (Timestamp, Name, Phone)
+        spreadsheetId,
+        range, 
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [

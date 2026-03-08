@@ -14,6 +14,7 @@ export default function Invitation() {
   
   // Refs for the DOM elements corresponding to physics bodies
   const boxRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const isSharing = useRef(false);
 
   // Items content (Texts + Color Boxes)
   const items = useMemo(() => {
@@ -257,19 +258,31 @@ export default function Invitation() {
   };
 
   const handleShare = async () => {
+    if (isSharing.current) return;
+
     if (navigator.share) {
       try {
+        isSharing.current = true;
         await navigator.share({
           title: 'Node to Nod 초대장',
           text: `${name}님을 Node to Nod에 초대합니다.`,
           url: window.location.href,
         });
-      } catch (err) {
-        console.error('Error sharing:', err);
+      } catch (err: any) {
+        // Ignore user cancellation or concurrent share errors
+        if (err.name !== 'AbortError' && err.name !== 'NotAllowedError') {
+           console.error('Error sharing:', err);
+        }
+      } finally {
+        isSharing.current = false;
       }
     } else {
-      await navigator.clipboard.writeText(window.location.href);
-      alert('링크가 복사되었습니다!');
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        alert('링크가 복사되었습니다!');
+      } catch (err) {
+        console.error('Clipboard error:', err);
+      }
     }
   };
 
