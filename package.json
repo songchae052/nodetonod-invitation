@@ -11,6 +11,9 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "optionalDependencies": {
+  "@rollup/rollup-linux-x64-gnu": "4.9.5"
+    },
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
@@ -39,8 +42,4 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
-}
-
-"optionalDependencies": {
-  "@rollup/rollup-linux-x64-gnu": "4.9.5"
 }
